@@ -1,0 +1,10 @@
+[package]
+name = "acme_test_server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "0.8.4"
+rand = "0.9.1"
+time = { version = "0.3.41", features = ["formatting", "macros"] }
+tokio = { version = "1.45.1", features = ["full"] }
