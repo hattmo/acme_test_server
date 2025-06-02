@@ -77,8 +77,8 @@ async fn main() -> IoResult<()> {
     }
 }
 
-const CHECKIN_MESSAGE: &'static [u8] = b"roadrunner checkin\0";
-const SHUTDOWN_MESSAGE: &'static [u8] = b"shutting down\0";
+const CHECKIN_MESSAGE: &[u8] = b"roadrunner checkin\0";
+const SHUTDOWN_MESSAGE: &[u8] = b"shutting down\0";
 
 async fn handle_connection(
     log: &mut String,
@@ -215,12 +215,12 @@ async fn handle_response(
     expected_message: Option<&[u8]>,
 ) -> Result<(), String> {
     let body = parse_response(log, conn).await?;
-    if let Some(expected) = expected_message {
-        if body != expected {
-            return Err(format!(
-                "Invalid response\nGot: {body:?}\nExpected: {expected:?}"
-            ));
-        }
+    if let Some(expected) = expected_message
+        && body != expected
+    {
+        return Err(format!(
+            "Invalid response\nGot: {body:?}\nExpected: {expected:?}"
+        ));
     }
     Ok(())
 }

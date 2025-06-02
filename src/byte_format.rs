@@ -9,7 +9,7 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self(bytes) = self;
         let bytes = bytes.as_ref();
-        let bytes_iter = bytes.into_iter().map(|&b| {
+        let bytes_iter = bytes.iter().map(|&b| {
             if b.is_ascii_alphanumeric() {
                 if f.alternate() {
                     format!("\x1b[31m{:>2.2}\x1b[m ", (b as char).to_string())
@@ -22,11 +22,10 @@ where
         });
         let bytes_vec: Vec<String> = if let Some(precision) = f.precision() {
             let mut bytes_vec: Vec<String> = bytes_iter.take(precision).collect();
-            if bytes_vec.len() < bytes.len() {
-                if let Some(last) = bytes_vec.last_mut() {
+            if bytes_vec.len() < bytes.len()
+                && let Some(last) = bytes_vec.last_mut() {
                     *last = "...".to_string();
                 }
-            }
             bytes_vec
         } else {
             bytes_iter.collect()

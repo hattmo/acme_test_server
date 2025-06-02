@@ -85,7 +85,7 @@ async fn root(State(state): State<&'static Mutex<VecDeque<TestResult>>>) -> impl
                 }
                 let marks: String = marks
                     .into_iter()
-                    .map(|c| format!("<td>{}</td>", c))
+                    .map(|c| format!("<td>{c}</td>"))
                     .collect();
                 let time = time
                     .format(format_description!("[hour]:[minute]"))
@@ -127,8 +127,7 @@ a {{
 }}
                 </style>
             </head>
-            <body>{}{}{}</body>
-        </html>",
-        TABLE_HEAD, rows, TABLE_TAIL
+            <body>{TABLE_HEAD}{rows}{TABLE_TAIL}</body>
+        </html>"
     ))
 }

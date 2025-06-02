@@ -97,7 +97,7 @@ impl Listener for GenericListener {
     fn local_addr(&self) -> tokio::io::Result<Self::Addr> {
         match self {
             GenericListener::Tcp(tcp_listener) => {
-                tcp_listener.local_addr().map(|addr| GenericAddr::Tcp(addr))
+                tcp_listener.local_addr().map(GenericAddr::Tcp)
             }
             GenericListener::Unix(unix_listener) => {
                 unix_listener.local_addr().map(|_| GenericAddr::Unix)
@@ -114,7 +114,7 @@ pub struct ServerSockets {
 
 pub async fn setup_sockets() -> IoResult<ServerSockets> {
     Ok(
-        if let Ok(Ok(i)) = std::env::var("LISTEN_FDS").and_then(|fds| Ok(fds.parse::<u8>()))
+        if let Ok(Ok(i)) = std::env::var("LISTEN_FDS").map(|fds| fds.parse::<u8>())
             && i == 2
         {
             ServerSockets {

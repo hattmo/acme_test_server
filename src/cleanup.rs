@@ -9,7 +9,7 @@ pub async fn cleanup_job(results: &'static Mutex<VecDeque<TestResult>>, is_activ
         let now = OffsetDateTime::now_utc().to_offset(offset!(-4));
         let mut results = results.lock().await;
         results.retain(|i| (i.time + Duration::from_mins(5)) > now);
-        if is_activated && results.len() == 0 {
+        if is_activated && results.is_empty() {
             println!("Shuting down due to inactivity");
             exit(0);
         }
