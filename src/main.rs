@@ -1,25 +1,19 @@
 #![feature(duration_constructors_lite)]
 
-use std::{
-    fmt::{Display, Write},
-    io::Result as IoResult,
-    net::SocketAddr,
-    time::Duration,
-};
+mod byte_format;
+mod cleanup;
+mod setup;
+mod web;
 
-use axum::{
-    extract::State,
-    response::{Html, IntoResponse},
-    routing::get,
-};
+use std::{collections::VecDeque, fmt::Write, io::Result as IoResult};
+
+use axum::serve::Listener;
+use byte_format::ByteFormat;
 use rand::distr::{Alphabetic, SampleString};
-use time::{
-    OffsetDateTime,
-    macros::{format_description, offset},
-};
+use setup::{GenericAddr, GenericStream, ServerSockets};
+use time::{OffsetDateTime, macros::offset};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
     sync::Mutex,
 };
 
@@ -39,19 +33,21 @@ enum Status {
 
 struct TestResult {
     time: OffsetDateTime,
-    addr: SocketAddr,
+    addr: GenericAddr,
     status: Status,
     log: String,
 }
 
 #[tokio::main]
 async fn main() -> IoResult<()> {
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:7777").await?;
-    println!("Strated acme server port: 7777");
-    let results: &'static _ = Box::leak(Box::new(Mutex::new(Vec::new())));
-    tokio::spawn(web_job(results));
-    tokio::spawn(cleanup_job(results));
-    while let Ok((conn, addr)) = listener.accept().await {
+    let ServerSockets { web, mut c2 } = setup::setup_sockets().await?;
+    let addr = web.local_addr()?;
+    println!("Strated acme server port: {addr}");
+    let results: &'static _ = Box::leak(Box::new(Mutex::new(VecDeque::new())));
+    tokio::spawn(web::web_job(results, web));
+    tokio::spawn(cleanup::cleanup_job(results));
+    loop {
+        let (conn, addr) = c2.accept().await;
         println!("New rr connection from:{addr}");
         tokio::spawn(async move {
             let mut log = String::new();
@@ -63,25 +59,17 @@ async fn main() -> IoResult<()> {
                 }
             };
             let time = time::UtcDateTime::now().to_offset(offset!(-4));
-            results.lock().await.push(TestResult {
+            let mut results = results.lock().await;
+            results.push_back(TestResult {
                 time,
                 addr,
                 status,
                 log,
             });
+            if results.len() > 10 {
+                results.pop_front();
+            }
         });
-    }
-    Ok(())
-}
-
-async fn cleanup_job(results: &'static Mutex<Vec<TestResult>>) {
-    loop {
-        tokio::time::sleep(Duration::from_mins(5)).await;
-        let now = OffsetDateTime::now_utc().to_offset(offset!(-4));
-        results
-            .lock()
-            .await
-            .retain(|i| (i.time + Duration::from_mins(5)) > now);
     }
 }
 
@@ -90,7 +78,7 @@ const SHUTDOWN_MESSAGE: &'static [u8] = b"shutting down\0";
 
 async fn handle_connection(
     log: &mut String,
-    mut conn: TcpStream,
+    mut conn: GenericStream,
 ) -> Result<Status, (Status, String)> {
     writeln!(log, "============\n").unwrap();
     writeln!(log, "Testing Checkin").unwrap();
@@ -178,7 +166,7 @@ fn generate_upload_arg(path: &[u8], content: &[u8]) -> Vec<u8> {
 
 async fn send_recieve(
     log: &mut String,
-    conn: &mut TcpStream,
+    conn: &mut GenericStream,
     command: &[u8],
     args: &[u8],
     expected: Option<&[u8]>,
@@ -190,7 +178,7 @@ async fn send_recieve(
 
 async fn send_command(
     log: &mut String,
-    conn: &mut TcpStream,
+    conn: &mut GenericStream,
     command: &[u8],
     args: &[u8],
 ) -> Result<(), String> {
@@ -219,7 +207,7 @@ fn generate_command(command: &[u8], args: &[u8]) -> Vec<u8> {
 
 async fn handle_response(
     log: &mut String,
-    conn: &mut TcpStream,
+    conn: &mut GenericStream,
     expected_message: Option<&[u8]>,
 ) -> Result<(), String> {
     let body = parse_response(log, conn).await?;
@@ -233,7 +221,7 @@ async fn handle_response(
     Ok(())
 }
 
-async fn parse_response(log: &mut String, conn: &mut TcpStream) -> Result<Vec<u8>, String> {
+async fn parse_response(log: &mut String, conn: &mut GenericStream) -> Result<Vec<u8>, String> {
     let total_size = conn
         .read_u32()
         .await
@@ -267,173 +255,4 @@ async fn parse_response(log: &mut String, conn: &mut TcpStream) -> Result<Vec<u8
     write!(log, "{:16.64}", ByteFormat(&body)).unwrap();
     writeln!(log, "-------------------").unwrap();
     Ok(body)
-}
-
-struct ByteFormat<'a>(&'a [u8]);
-
-impl<'a> Display for ByteFormat<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self(bytes) = self;
-        let bytes_iter = bytes.into_iter().map(|&b| {
-            if b.is_ascii_alphanumeric() {
-                if f.alternate() {
-                    format!("\x1b[31m{:>2.2}\x1b[m ", (b as char).to_string())
-                } else {
-                    format!("{:>2.2} ", (b as char).to_string())
-                }
-            } else {
-                format!("{b:>02.2X} ")
-            }
-        });
-        let bytes_vec: Vec<String> = if let Some(precision) = f.precision() {
-            let mut bytes_vec: Vec<String> = bytes_iter.take(precision).collect();
-            if bytes_vec.len() < bytes.len() {
-                if let Some(last) = bytes_vec.last_mut() {
-                    *last = "...".to_string();
-                }
-            }
-            bytes_vec
-        } else {
-            bytes_iter.collect()
-        };
-        if let Some(width) = f.width() {
-            for row in bytes_vec.chunks(width) {
-                let row: String = row.iter().map(String::as_str).collect();
-                writeln!(f, "{row}")?;
-            }
-        } else {
-            let out: String = bytes_vec.iter().map(String::as_str).collect();
-            write!(f, "{out}")?;
-        }
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::ByteFormat;
-
-    #[test]
-    fn test_bytes() {
-        let b = [1, 2, 3, 4, 5, 6, 7, 8, 9, 65];
-        let bytes = ByteFormat(&b);
-        println!("{bytes:#}");
-        assert!(false);
-    }
-}
-
-async fn web_job(results: &'static Mutex<Vec<TestResult>>) -> IoResult<()> {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8888").await?;
-    let router = axum::Router::new()
-        .route("/", get(root))
-        .with_state(results);
-    println!("Web server started");
-    axum::serve(listener, router).await?;
-    Ok(())
-}
-
-static TABLE_HEAD: &str = r##"
-<table>
-    <tr>
-        <th>Time</th>
-        <th>IP</th>
-        <th>CheckingIn</th>
-        <th>Sleep</th>
-        <th>Upload</th>
-        <th>Download</th>
-        <th>Hostname</th>
-        <th>Netstat</th>
-        <th>ProcessList</th>
-        <th>Invoke</th>
-        <th>Shutdown</th>
-        <th>Done</th>
-        <th>Logs</th>
-    </tr>
-"##;
-static TABLE_TAIL: &str = r##"
-</table>
-"##;
-async fn root(State(state): State<&'static Mutex<Vec<TestResult>>>) -> impl IntoResponse {
-    let rows: String = state
-        .lock()
-        .await
-        .iter()
-        .rev()
-        .enumerate()
-        .map(
-            |(
-                i,
-                TestResult {
-                    time,
-                    addr,
-                    status,
-                    log,
-                },
-            )| {
-                let mut marks = [' '; 10];
-                let n = match status {
-                    Status::CheckingIn => 0,
-                    Status::Sleep => 1,
-                    Status::Upload => 2,
-                    Status::Download => 3,
-                    Status::Hostname => 4,
-                    Status::Netstat => 5,
-                    Status::ProcessList => 6,
-                    Status::Invoke => 7,
-                    Status::Shutdown => 8,
-                    Status::Done => 9,
-                };
-                marks[..n].fill('\u{2705}');
-                marks[n] = '\u{274C}';
-                if let Status::Done = status {
-                    marks[n] = '\u{2705}';
-                }
-                let marks: String = marks
-                    .into_iter()
-                    .map(|c| format!("<td>{}</td>", c))
-                    .collect();
-                let time = time
-                    .format(format_description!("[hour]:[minute]"))
-                    .unwrap_or_else(|_| "00:00".to_string());
-                let tds = format!("<td>{time}</td><td>{addr}</td>") + &marks;
-                // let log: String = log
-                //     .chars()
-                //     .map(|c| {
-                //         if c == '\n' {
-                //             "<br>".to_string()
-                //         } else {
-                //             c.to_string()
-                //         }
-                //     })
-                //     .collect();
-                format!(
-                    "<tr>{tds}<td><a href=\"#{i}\">\u{2795}</a><a href=\"#\">\u{2796}</a></td></tr>
-                    <tr id=\"{i}\" class=\"expandable\"><td colspan=13><pre>{log}</pre></td></tr>"
-                )
-            },
-        )
-        .collect();
-    Html(format!(
-        "<html>
-            <head>
-                <style>
-table, th, td {{
-    border: 1px solid black;
-}}
-.expandable {{
-    display: none;
-}}
-.expandable:target {{
-    display: block;
-}}
-a {{
-    all: unset;
-    cursor: pointer;
-}}
-                </style>
-            </head>
-            <body>{}{}{}</body>
-        </html>",
-        TABLE_HEAD, rows, TABLE_TAIL
-    ))
 }
