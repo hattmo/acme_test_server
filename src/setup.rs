@@ -109,6 +109,7 @@ impl Listener for GenericListener {
 pub struct ServerSockets {
     pub web: GenericListener,
     pub c2: GenericListener,
+    pub is_activated: bool,
 }
 
 pub async fn setup_sockets() -> IoResult<ServerSockets> {
@@ -119,11 +120,16 @@ pub async fn setup_sockets() -> IoResult<ServerSockets> {
             ServerSockets {
                 web: get_sd_socket(3)?,
                 c2: get_sd_socket(4)?,
+                is_activated: true,
             }
         } else {
             let web = GenericListener::Tcp(TcpListener::bind("0.0.0.0:80").await?);
             let c2 = GenericListener::Tcp(TcpListener::bind("0.0.0.0:7777").await?);
-            ServerSockets { web, c2 }
+            ServerSockets {
+                web,
+                c2,
+                is_activated: false,
+            }
         },
     )
 }

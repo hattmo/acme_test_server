@@ -40,12 +40,16 @@ struct TestResult {
 
 #[tokio::main]
 async fn main() -> IoResult<()> {
-    let ServerSockets { web, mut c2 } = setup::setup_sockets().await?;
+    let ServerSockets {
+        web,
+        mut c2,
+        is_activated,
+    } = setup::setup_sockets().await?;
     let addr = web.local_addr()?;
     println!("Strated acme server port: {addr}");
     let results: &'static _ = Box::leak(Box::new(Mutex::new(VecDeque::new())));
     tokio::spawn(web::web_job(results, web));
-    tokio::spawn(cleanup::cleanup_job(results));
+    tokio::spawn(cleanup::cleanup_job(results, is_activated));
     loop {
         let (conn, addr) = c2.accept().await;
         println!("New rr connection from:{addr}");
