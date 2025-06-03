@@ -45,10 +45,13 @@ async fn main() -> IoResult<()> {
         mut c2,
         is_activated,
     } = setup::setup_sockets().await?;
-    let addr = web.local_addr()?;
-    println!("Strated acme server port: {addr}");
+    let web_addr = web.local_addr()?;
+    let c2_addr = c2.local_addr()?;
+    println!("Started acme server");
+    println!("Web address: {web_addr}");
+    println!("C2 address: {c2_addr}");
     let results: &'static _ = Box::leak(Box::new(Mutex::new(VecDeque::new())));
-    tokio::spawn(web::web_job(results, web));
+    tokio::spawn(web::web_job(results, web, c2_addr));
     tokio::spawn(cleanup::cleanup_job(results, is_activated));
     loop {
         let (conn, addr) = c2.accept().await;
@@ -70,7 +73,7 @@ async fn main() -> IoResult<()> {
                 status,
                 log,
             });
-            if results.len() > 10 {
+            if results.len() > 40 {
                 results.pop_front();
             }
         });

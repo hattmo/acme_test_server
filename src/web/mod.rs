@@ -1,4 +1,4 @@
-use crate::setup::GenericListener;
+use crate::setup::{GenericAddr, GenericListener};
 
 use super::{Status, TestResult};
 
@@ -15,12 +15,17 @@ use tokio::sync::Mutex;
 pub async fn web_job(
     results: &'static Mutex<VecDeque<TestResult>>,
     listener: GenericListener,
+    c2_addr: GenericAddr,
 ) -> IoResult<()> {
-    // let listener = tokio::net::TcpListener::bind("127.0.0.1:8888").await?;
+    let port: &'static str = c2_addr
+        .to_string()
+        .split_once(":")
+        .map(|(_, p)| format!("<h3>C2 Port: {p}</h3>").leak() as &'static str)
+        .map(|i| i)
+        .unwrap_or("");
     let router = axum::Router::new()
         .route("/", get(root))
-        .with_state(results);
-    println!("Web server started");
+        .with_state((results, port));
     axum::serve(listener, router).await?;
     Ok(())
 }
@@ -48,7 +53,9 @@ static TABLE_TAIL: &str = r##"
 </table>
 "##;
 
-async fn root(State(state): State<&'static Mutex<VecDeque<TestResult>>>) -> impl IntoResponse {
+async fn root(
+    State((state, c2_port)): State<(&'static Mutex<VecDeque<TestResult>>, &'static str)>,
+) -> impl IntoResponse {
     let rows: String = state
         .lock()
         .await
@@ -83,24 +90,11 @@ async fn root(State(state): State<&'static Mutex<VecDeque<TestResult>>>) -> impl
                 if let Status::Done = status {
                     marks[n] = '\u{2705}';
                 }
-                let marks: String = marks
-                    .into_iter()
-                    .map(|c| format!("<td>{c}</td>"))
-                    .collect();
+                let marks: String = marks.into_iter().map(|c| format!("<td>{c}</td>")).collect();
                 let time = time
                     .format(format_description!("[hour]:[minute]"))
                     .unwrap_or_else(|_| "00:00".to_string());
                 let tds = format!("<td>{time}</td><td>{addr}</td>") + &marks;
-                // let log: String = log
-                //     .chars()
-                //     .map(|c| {
-                //         if c == '\n' {
-                //             "<br>".to_string()
-                //         } else {
-                //             c.to_string()
-                //         }
-                //     })
-                //     .collect();
                 format!(
                     "<tr>{tds}<td><a href=\"#{i}\">\u{2795}</a><a href=\"#\">\u{2796}</a></td></tr>
                     <tr id=\"{i}\" class=\"expandable\"><td colspan=13><pre>{log}</pre></td></tr>"
@@ -108,6 +102,7 @@ async fn root(State(state): State<&'static Mutex<VecDeque<TestResult>>>) -> impl
             },
         )
         .collect();
+
     Html(format!(
         "<html>
             <head>
@@ -127,7 +122,13 @@ a {{
 }}
                 </style>
             </head>
-            <body>{TABLE_HEAD}{rows}{TABLE_TAIL}</body>
+            <body>
+                <h1>ACME TEST SERVER</h1>
+                {c2_port}
+                {TABLE_HEAD}
+                {rows}
+                {TABLE_TAIL}
+            </body>
         </html>"
     ))
 }
