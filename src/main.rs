@@ -228,6 +228,8 @@ async fn handle_response(
     Ok(())
 }
 
+const MAX_MESSAGE_LEN: u32 = 10_000;
+
 async fn parse_response(log: &mut String, conn: &mut GenericStream) -> Result<Vec<u8>, String> {
     let total_size = conn
         .read_u32()
@@ -244,7 +246,7 @@ async fn parse_response(log: &mut String, conn: &mut GenericStream) -> Result<Ve
         .await
         .map_err(|e| format!("Failed to read message length: {e}"))?;
     writeln!(log, "Message length: {message_length}").unwrap();
-    if message_length > 10000 {
+    if message_length > MAX_MESSAGE_LEN {
         return Err("Too much data in message".to_owned());
     }
     let message_length = message_length as usize;
