@@ -228,7 +228,7 @@ async fn handle_response(
     Ok(())
 }
 
-const MAX_MESSAGE_LEN: u32 = 10_000;
+const MAX_MESSAGE_LEN: u32 = 20_000;
 
 async fn parse_response(log: &mut String, conn: &mut GenericStream) -> Result<Vec<u8>, String> {
     let total_size = conn
