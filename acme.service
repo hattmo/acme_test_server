@@ -1,0 +1,8 @@
+[Unit]
+Description=ACME Test Server
+Requires=acme.socket
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/acme_test_server
+Restart=on-failure
